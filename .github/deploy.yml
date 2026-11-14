@@ -1,0 +1,106 @@
+name: Build and Deploy
+ 
+on:
+  push:
+    branches: [main]
+    paths: ["app/**"]
+  workflow_dispatch:
+ 
+permissions:
+  id-token: write
+  contents: read
+ 
+env:
+  IMAGE_NAME: hello-user
+ 
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+ 
+      - uses: docker/setup-buildx-action@v3
+ 
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+ 
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./app
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+ 
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+ 
+      - name: Find instance and public IP
+        id: instance
+        run: |
+          INSTANCE_ID=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=hello-user-server" "Name=instance-state-name,Values=running" \
+            --query "Reservations[0].Instances[0].InstanceId" --output text)
+          if [ -z "$INSTANCE_ID" ] || [ "$INSTANCE_ID" = "None" ]; then
+            echo "Instance not found. Run terraform apply first."
+            exit 1
+          fi
+          PUBLIC_IP=$(aws ec2 describe-instances \
+            --instance-ids "$INSTANCE_ID" \
+            --query "Reservations[0].Instances[0].PublicIpAddress" --output text)
+          echo "instance_id=$INSTANCE_ID" >> "$GITHUB_OUTPUT"
+          echo "public_ip=$PUBLIC_IP" >> "$GITHUB_OUTPUT"
+ 
+      - name: Wait for SSM agent to be online
+        run: |
+          for i in $(seq 1 20); do
+            STATUS=$(aws ssm describe-instance-information \
+              --filters "Key=InstanceIds,Values=${{ steps.instance.outputs.instance_id }}" \
+              --query "InstanceInformationList[0].PingStatus" --output text)
+            echo "Attempt $i: SSM status = $STATUS"
+            if [ "$STATUS" = "Online" ]; then exit 0; fi
+            sleep 15
+          done
+          echo "SSM agent never came online"
+          exit 1
+ 
+      - name: Deploy container via SSM
+        run: |
+          IMAGE="${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          CMD_ID=$(aws ssm send-command \
+            --instance-ids "${{ steps.instance.outputs.instance_id }}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters "commands=[
+              \"docker pull $IMAGE\",
+              \"docker stop hello-user || true\",
+              \"docker rm hello-user || true\",
+              \"docker run -d --name hello-user --restart unless-stopped -p 80:5000 $IMAGE\",
+              \"docker image prune -af\"
+            ]" \
+            --query "Command.CommandId" --output text)
+ 
+          aws ssm wait command-executed \
+            --command-id "$CMD_ID" \
+            --instance-id "${{ steps.instance.outputs.instance_id }}"
+ 
+      - name: Health check
+        run: |
+          for i in $(seq 1 10); do
+            RESPONSE=$(curl -s --max-time 5 http://${{ steps.instance.outputs.public_ip }} || true)
+            echo "Attempt $i: $RESPONSE"
+            if [ "$RESPONSE" = "hello user" ]; then
+              echo "Deployment healthy at http://${{ steps.instance.outputs.public_ip }}"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Health check failed"
+          exit 1
