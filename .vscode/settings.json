@@ -1,0 +1,6 @@
+{
+    "sonarlint.connectedMode.project": {
+        "connectionId": "thapandatta",
+        "projectKey": "thapandatta_demo-devops-project"
+    }
+}
