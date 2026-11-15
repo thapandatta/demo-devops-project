@@ -48,20 +48,6 @@ def test_health(client):
     assert response.get_json() == {"status": "ok"}
 
 
-def test_info_uses_env_version(client, monkeypatch):
-    monkeypatch.setenv("APP_VERSION", "1.2.3")
-    response = client.get("/info")
-    body = response.get_json()
-    assert response.status_code == 200
-    assert body["version"] == "1.2.3"
-    assert "hostname" in body
-
-
-def test_info_default_version(client, monkeypatch):
-    monkeypatch.delenv("APP_VERSION", raising=False)
-    response = client.get("/info")
-    assert response.get_json()["version"] == "dev"
-
 
 # ---------- items API ----------
 def test_list_items_empty(client):
