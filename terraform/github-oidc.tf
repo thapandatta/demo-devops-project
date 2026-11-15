@@ -1,3 +1,4 @@
+
 resource "aws_iam_openid_connect_provider" "github" {
   url             = "https://token.actions.githubusercontent.com"
   client_id_list  = ["sts.amazonaws.com"]
@@ -20,9 +21,11 @@ data "aws_iam_policy_document" "github_assume" {
     }
 
     condition {
-      test     = "StringLike"
+      test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repo}:ref:refs/heads/main"]
+      values = [
+        "repo:thapandatta@110528346/demo-devops-project@1457691226:ref:refs/heads/main"
+      ]
     }
   }
 }
