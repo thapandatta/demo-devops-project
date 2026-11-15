@@ -72,7 +72,7 @@ resource "aws_security_group" "web" {
 
 # ---------- EC2 (free tier eligible) ----------
 resource "aws_instance" "web" {
-  ami                         = "ami-0e9262cbb2344d5ee"
+  ami                         = "ami-096ef200a877f36af"
   instance_type               = var.instance_type
   iam_instance_profile        = aws_iam_instance_profile.ec2_ssm.name
   vpc_security_group_ids      = [aws_security_group.web.id]
