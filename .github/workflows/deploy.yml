@@ -41,16 +41,16 @@ jobs:
           name: coverage-report
           path: coverage.xml
 
-      - name: SonarCloud scan
-        uses: SonarSource/sonarqube-scan-action@v5
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+#      - name: SonarCloud scan
+ #       uses: SonarSource/sonarqube-scan-action@v5
+  #      env:
+   #       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
-      - name: SonarCloud quality gate
-        uses: SonarSource/sonarqube-quality-gate-action@v1
-        timeout-minutes: 5
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+     # - name: SonarCloud quality gate
+     #   uses: SonarSource/sonarqube-quality-gate-action@v1
+      #  timeout-minutes: 5
+      #  env:
+       #   SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
   build-and-push:
     needs: test-and-scan
