@@ -3,4 +3,10 @@
 *.tfstate.*
 *.tfvars
 crash.log
-EOF
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+coverage.xml
+.venv/
+venv/

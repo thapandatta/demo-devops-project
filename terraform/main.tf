@@ -89,10 +89,15 @@ resource "aws_instance" "web" {
     encrypted   = true
   }
 
-  user_data = <<-USERDATA
+    user_data = <<-USERDATA
     #!/bin/bash
     dnf install -y docker
     systemctl enable --now docker
+    mkdir -p /usr/local/lib/docker/cli-plugins
+    curl -SL https://github.com/docker/compose/releases/download/v2.29.7/docker-compose-linux-x86_64 \
+      -o /usr/local/lib/docker/cli-plugins/docker-compose
+    chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+    mkdir -p /opt/app
   USERDATA
 
   user_data_replace_on_change = true
