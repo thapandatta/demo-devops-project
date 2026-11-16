@@ -1,4 +1,3 @@
-
 resource "aws_iam_openid_connect_provider" "github" {
   url             = "https://token.actions.githubusercontent.com"
   client_id_list  = ["sts.amazonaws.com"]
@@ -23,9 +22,7 @@ data "aws_iam_policy_document" "github_assume" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values = [
-        "repo:thapandatta@110528346/demo-devops-project@1457691226:ref:refs/heads/main"
-      ]
+      values   = ["repo:thapandatta@110528346/demo-devops-project@1457691226:ref:refs/heads/main"]
     }
   }
 }
@@ -72,29 +69,4 @@ resource "aws_iam_role_policy" "deploy" {
   name   = "deploy-only"
   role   = aws_iam_role.github_actions.id
   policy = data.aws_iam_policy_document.deploy.json
-}
-
-# ---------- $1 budget alert ----------
-resource "aws_budgets_budget" "learning" {
-  name         = "${var.project_name}-budget"
-  budget_type  = "COST"
-  limit_amount = "1"
-  limit_unit   = "USD"
-  time_unit    = "MONTHLY"
-
-  notification {
-    comparison_operator        = "GREATER_THAN"
-    threshold                  = 80
-    threshold_type             = "PERCENTAGE"
-    notification_type          = "ACTUAL"
-    subscriber_email_addresses = [var.alert_email]
-  }
-
-  notification {
-    comparison_operator        = "GREATER_THAN"
-    threshold                  = 100
-    threshold_type             = "PERCENTAGE"
-    notification_type          = "FORECASTED"
-    subscriber_email_addresses = [var.alert_email]
-  }
 }

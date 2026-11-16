@@ -20,89 +20,42 @@ provider "aws" {
   }
 }
 
+module "app_server" {
+  source = "./modules/app-server"
 
-# ---------- IAM role for the EC2 instance (SSM) ----------
-data "aws_iam_policy_document" "ec2_assume" {
-  statement {
-    actions = ["sts:AssumeRole"]
-
-    principals {
-      type        = "Service"
-      identifiers = ["ec2.amazonaws.com"]
-    }
-  }
+  project_name  = var.project_name
+  instance_type = var.instance_type
 }
 
-resource "aws_iam_role" "ec2_ssm" {
-  name               = "${var.project_name}-ec2-ssm-role"
-  assume_role_policy = data.aws_iam_policy_document.ec2_assume.json
+module "cicd_access" {
+  source = "./modules/ci-cd-access"
+
+  project_name = var.project_name
+  region       = var.region
+  github_repo  = var.github_repo
 }
 
-resource "aws_iam_role_policy_attachment" "ssm_core" {
-  role       = aws_iam_role.ec2_ssm.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
-}
+# ---------- $1 budget alert (single resource, so no module needed) ----------
+resource "aws_budgets_budget" "learning" {
+  name         = "${var.project_name}-budget"
+  budget_type  = "COST"
+  limit_amount = "1"
+  limit_unit   = "USD"
+  time_unit    = "MONTHLY"
 
-resource "aws_iam_instance_profile" "ec2_ssm" {
-  name = "${var.project_name}-ec2-profile"
-  role = aws_iam_role.ec2_ssm.name
-}
-
-# ---------- Security group: HTTP only, no SSH ----------
-resource "aws_security_group" "web" {
-  name        = "${var.project_name}-sg"
-  description = "Allow HTTP inbound only"
-
-  ingress {
-    description = "HTTP"
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+  notification {
+    comparison_operator        = "GREATER_THAN"
+    threshold                  = 80
+    threshold_type             = "PERCENTAGE"
+    notification_type          = "ACTUAL"
+    subscriber_email_addresses = [var.alert_email]
   }
 
-  egress {
-    description = "All outbound"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-}
-
-# ---------- EC2 (free tier eligible) ----------
-resource "aws_instance" "web" {
-  ami                         = "ami-096ef200a877f36af"
-  instance_type               = var.instance_type
-  iam_instance_profile        = aws_iam_instance_profile.ec2_ssm.name
-  vpc_security_group_ids      = [aws_security_group.web.id]
-  associate_public_ip_address = true
-
-  metadata_options {
-    http_endpoint = "enabled"
-    http_tokens   = "required" # enforce IMDSv2
-  }
-
-  root_block_device {
-    volume_size = 8
-    volume_type = "gp3"
-    encrypted   = true
-  }
-
-    user_data = <<-USERDATA
-    #!/bin/bash
-    dnf install -y docker
-    systemctl enable --now docker
-    mkdir -p /usr/local/lib/docker/cli-plugins
-    curl -SL https://github.com/docker/compose/releases/download/v2.29.7/docker-compose-linux-x86_64 \
-      -o /usr/local/lib/docker/cli-plugins/docker-compose
-    chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
-    mkdir -p /opt/app
-  USERDATA
-
-  user_data_replace_on_change = true
-
-  tags = {
-    Name = "${var.project_name}-server"
+  notification {
+    comparison_operator        = "GREATER_THAN"
+    threshold                  = 100
+    threshold_type             = "PERCENTAGE"
+    notification_type          = "FORECASTED"
+    subscriber_email_addresses = [var.alert_email]
   }
 }
