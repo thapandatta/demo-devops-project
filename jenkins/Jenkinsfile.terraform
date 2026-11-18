@@ -1,0 +1,142 @@
+pipeline {
+    agent any
+
+    parameters {
+        choice(name: 'ACTION',
+               choices: ['plan', 'apply', 'destroy'],
+               description: 'plan = preview only. apply = create or update. destroy = tear everything down')
+        string(name: 'DESTROY_CONFIRM',
+               defaultValue: '',
+               description: 'Type the word destroy here ONLY when ACTION is destroy')
+    }
+
+    options {
+        timestamps()
+        timeout(time: 45, unit: 'MINUTES')
+        disableConcurrentBuilds()
+        buildDiscarder(logRotator(numToKeepStr: '20'))
+    }
+
+    environment {
+        TF_IN_AUTOMATION   = 'true'
+        TF_INPUT           = 'false'
+        AWS_DEFAULT_REGION = 'us-east-1'
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                checkout scm
+                sh 'terraform version'
+                sh 'aws sts get-caller-identity'
+            }
+        }
+
+        stage('Safety Check') {
+            steps {
+                script {
+                    if (params.ACTION == 'destroy' && params.DESTROY_CONFIRM != 'destroy') {
+                        error('Destroy requested but DESTROY_CONFIRM was not "destroy". Aborting.')
+                    }
+                }
+            }
+        }
+
+        stage('Init and Validate') {
+            steps {
+                dir('terraform') {
+                    sh '''
+                        terraform fmt -check -recursive
+                        terraform init -input=false
+                        terraform validate
+                    '''
+                }
+            }
+        }
+
+        stage('Plan') {
+            steps {
+                withCredentials([
+                    string(credentialsId: 'tf-github-repo', variable: 'TF_VAR_github_repo'),
+                    string(credentialsId: 'tf-alert-email', variable: 'TF_VAR_alert_email')
+                ]) {
+                    dir('terraform') {
+                        script {
+                            def destroyFlag = (params.ACTION == 'destroy') ? '-destroy' : ''
+                            // exit code: 0 = no changes, 2 = changes, 1 = error
+                            def code = sh(returnStatus: true, script: """
+                                terraform plan ${destroyFlag} -input=false -detailed-exitcode -out=tfplan
+                            """)
+                            if (code == 1) { error('terraform plan failed') }
+                            env.HAS_CHANGES = (code == 2) ? 'true' : 'false'
+                        }
+                        sh 'terraform show -no-color tfplan > plan.txt'
+                    }
+                }
+                archiveArtifacts artifacts: 'terraform/plan.txt', fingerprint: true
+            }
+        }
+
+        stage('Review Plan') {
+            when { expression { env.HAS_CHANGES == 'true' && params.ACTION != 'plan' } }
+            steps {
+                sh '''
+                    echo "================ PLAN SUMMARY ================"
+                    grep -E "^(Plan:|  # )" terraform/plan.txt || true
+                    echo "=============================================="
+                '''
+                script {
+                    def destructive = sh(returnStatus: true,
+                        script: 'grep -qE "must be replaced|will be destroyed" terraform/plan.txt') == 0
+                    def msg = destructive
+                        ? 'WARNING: this plan DESTROYS or REPLACES resources. Read plan.txt first. Continue?'
+                        : 'Apply this plan?'
+                    timeout(time: 15, unit: 'MINUTES') {
+                        input message: msg, ok: 'Yes, proceed'
+                    }
+                }
+            }
+        }
+
+        stage('Apply') {
+            when { expression { env.HAS_CHANGES == 'true' && params.ACTION != 'plan' } }
+            steps {
+                withCredentials([
+                    string(credentialsId: 'tf-github-repo', variable: 'TF_VAR_github_repo'),
+                    string(credentialsId: 'tf-alert-email', variable: 'TF_VAR_alert_email')
+                ]) {
+                    dir('terraform') {
+                        // Applies the exact saved plan, never a fresh one
+                        sh 'terraform apply -input=false tfplan'
+                    }
+                }
+            }
+        }
+
+        stage('Outputs') {
+            when { expression { params.ACTION == 'apply' } }
+            steps {
+                dir('terraform') {
+                    sh 'terraform output'
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            sh 'rm -f terraform/tfplan || true'
+        }
+        success {
+            script {
+                if (env.HAS_CHANGES == 'false') {
+                    echo 'No changes. Infrastructure matches the code.'
+                }
+            }
+        }
+        failure {
+            echo 'Terraform pipeline failed. Read the first red stage.'
+        }
+    }
+}

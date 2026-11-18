@@ -10,3 +10,6 @@ __pycache__/
 coverage.xml
 .venv/
 venv/
+bootstrap/.terraform/
+bootstrap/terraform.tfstate
+terraform.tfstate.pre-s3-backup
