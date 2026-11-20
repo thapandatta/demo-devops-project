@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Items</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      margin: 0;
+      background: #f4f6f8;
+      color: #1f2933;
+    }
+    main { max-width: 640px; margin: 0 auto; padding: 24px 16px; }
+    header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+    h1 { font-size: 1.4rem; margin: 0; }
+    button {
+      background: #2563eb; color: #fff; border: 0; border-radius: 6px;
+      padding: 8px 14px; font-size: 0.9rem; cursor: pointer;
+    }
+    button:hover { background: #1d4ed8; }
+    ul { list-style: none; margin: 0; padding: 0; background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+    li {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 14px 16px; cursor: pointer; border-bottom: 1px solid #eef0f3;
+    }
+    li:last-child { border-bottom: 0; }
+    li:hover { background: #f1f5ff; }
+    li.selected { background: #e0e9ff; }
+    .qty { color: #6b7280; font-size: 0.9rem; }
+    .message { padding: 24px; text-align: center; color: #6b7280; background: #fff; border-radius: 8px; }
+    .error { color: #b91c1c; }
+    #detail { margin-top: 16px; background: #fff; border-radius: 8px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+    #detail[hidden] { display: none; }
+    #detail h2 { margin: 0 0 12px; font-size: 1.1rem; }
+    dl { display: grid; grid-template-columns: 110px 1fr; gap: 8px 12px; margin: 0; }
+    dt { color: #6b7280; }
+    dd { margin: 0; word-break: break-all; }
+    .hint { margin-top: 12px; font-size: 0.8rem; color: #9ca3af; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Items</h1>
+      <button id="refresh" type="button">Refresh</button>
+    </header>
+
+    <div id="list-area" aria-live="polite"></div>
+
+    <section id="detail" hidden aria-live="polite"></section>
+  </main>
+
+  <script>
+    const listArea = document.getElementById("list-area");
+    const detail = document.getElementById("detail");
+    const refreshButton = document.getElementById("refresh");
+
+    // Build text safely. Item names come from users, so never insert them as HTML.
+    function el(tag, text, className) {
+      const node = document.createElement(tag);
+      if (text !== undefined) node.textContent = text;
+      if (className) node.className = className;
+      return node;
+    }
+
+    function showMessage(text, isError) {
+      listArea.replaceChildren(el("div", text, isError ? "message error" : "message"));
+    }
+
+    async function loadItems() {
+      detail.hidden = true;
+      showMessage("Loading...");
+      try {
+        const response = await fetch("/items");
+        if (!response.ok) throw new Error("Server returned " + response.status);
+        const data = await response.json();
+
+        if (!data.items.length) {
+          showMessage("No items yet.");
+          return;
+        }
+
+        const list = el("ul");
+        data.items
+          .slice()
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .forEach((item) => {
+            const row = el("li");
+            row.dataset.id = item.id;
+            row.tabIndex = 0;
+            row.append(el("span", item.name), el("span", "qty " + item.quantity, "qty"));
+            row.addEventListener("click", () => showDetail(item.id, row));
+            row.addEventListener("keydown", (event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                showDetail(item.id, row);
+              }
+            });
+            list.append(row);
+          });
+        listArea.replaceChildren(list);
+      } catch (error) {
+        showMessage("Could not load items. " + error.message, true);
+      }
+    }
+
+    async function showDetail(id, row) {
+      document.querySelectorAll("li.selected").forEach((li) => li.classList.remove("selected"));
+      row.classList.add("selected");
+      detail.hidden = false;
+      detail.replaceChildren(el("p", "Loading details..."));
+
+      try {
+        const response = await fetch("/items/" + encodeURIComponent(id));
+        if (response.status === 404) throw new Error("This item no longer exists.");
+        if (!response.ok) throw new Error("Server returned " + response.status);
+        const item = await response.json();
+        const cache = response.headers.get("X-Cache");
+
+        const fields = el("dl");
+        [
+          ["ID", item.id],
+          ["Name", item.name],
+          ["Cost", "$" + Number(item.cost).toFixed(2)],
+          ["Quantity", String(item.quantity)],
+        ].forEach(([label, value]) => fields.append(el("dt", label), el("dd", value)));
+
+        const parts = [el("h2", item.name), fields];
+        if (cache) parts.push(el("p", "Served from cache: " + cache, "hint"));
+        detail.replaceChildren(...parts);
+      } catch (error) {
+        detail.replaceChildren(el("p", error.message, "error"));
+      }
+    }
+
+    refreshButton.addEventListener("click", loadItems);
+    loadItems();
+  </script>
+</body>
+</html>

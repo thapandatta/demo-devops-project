@@ -1,6 +1,7 @@
 import os
 import socket
 from decimal import Decimal, InvalidOperation
+from flask import send_from_directory
 
 from flask import Flask, jsonify, request
 
@@ -104,6 +105,10 @@ def add_item():
         return jsonify(error=error), 400
     item = get_store().add(**values)
     return jsonify(item), 201
+
+@app.route("/ui")
+def ui():
+    return send_from_directory("static", "index.html")
 
 
 @app.route("/items/<item_id>", methods=["GET"])
