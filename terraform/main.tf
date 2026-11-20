@@ -43,6 +43,14 @@ module "cicd_access" {
   github_repo  = var.github_repo
 }
 
+module "notifications" {
+  source = "./modules/notifications"
+
+  project_name     = var.project_name
+  alert_email      = var.alert_email
+  table_stream_arn = module.app_server.table_stream_arn
+}
+
 # ---------- $1 budget alert (single resource, so no module needed) ----------
 resource "aws_budgets_budget" "learning" {
   name         = "${var.project_name}-budget"
