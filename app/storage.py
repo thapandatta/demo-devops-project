@@ -1,17 +1,19 @@
 import json
 import os
 import uuid
-from decimal import Decimal
+from datetime import datetime, timezone
 
 import boto3
 import redis
 
 CACHE_TTL_SECONDS = 60
-LIST_CACHE_KEY = "items:all"
+LIST_CACHE_KEY = "videos:all"
 
 
 def to_jsonable(value):
     """Convert DynamoDB Decimals into int/float so JSON can serialize them."""
+    from decimal import Decimal
+
     if isinstance(value, list):
         return [to_jsonable(v) for v in value]
     if isinstance(value, dict):
@@ -21,7 +23,7 @@ def to_jsonable(value):
     return value
 
 
-class ItemStore:
+class VideoStore:
     """DynamoDB-backed storage with a Redis cache in front (cache-aside)."""
 
     def __init__(self, table=None, cache=None):
@@ -61,56 +63,62 @@ class ItemStore:
             pass
 
     # ---- public API ----
-    def add(self, name, cost, quantity):
-        item = {
+    def add(self, ytvideoname, ytlink, description, length):
+        video = {
             "id": str(uuid.uuid4()),
-            "name": name,
-            "cost": Decimal(str(cost)),
-            "quantity": int(quantity),
+            "ytvideoname": ytvideoname,
+            "ytlink": ytlink,
+            "description": description,
+            "length": int(length),
+            "created_at": datetime.now(timezone.utc).isoformat(),
         }
-        self.table.put_item(Item=item)
+        self.table.put_item(Item=video)
         self._cache_delete(LIST_CACHE_KEY)
-        return to_jsonable(item)
+        return to_jsonable(video)
 
-    def get(self, item_id):
-        cache_key = f"item:{item_id}"
+    def get(self, video_id):
+        cache_key = f"video:{video_id}"
         cached = self._cache_get(cache_key)
         if cached is not None:
             return cached, "hit"
 
-        item = self.table.get_item(Key={"id": item_id}).get("Item")
-        if item:
-            item = to_jsonable(item)
-            self._cache_set(cache_key, item)
-        return item, "miss"
+        video = self.table.get_item(Key={"id": video_id}).get("Item")
+        if video:
+            video = to_jsonable(video)
+            self._cache_set(cache_key, video)
+        return video, "miss"
 
     def list_all(self):
         cached = self._cache_get(LIST_CACHE_KEY)
         if cached is not None:
             return cached, "hit"
 
-        items = to_jsonable(self.table.scan().get("Items", []))
-        self._cache_set(LIST_CACHE_KEY, items)
-        return items, "miss"
+        rows = to_jsonable(self.table.scan().get("Items", []))
+        # Skip leftover rows from the old schema (no ytvideoname)
+        videos = [row for row in rows if "ytvideoname" in row]
+        self._cache_set(LIST_CACHE_KEY, videos)
+        return videos, "miss"
 
-    def update(self, item_id, name, cost, quantity):
-        """Replace an existing item. Returns None if it doesn't exist."""
-        existing = self.table.get_item(Key={"id": item_id}).get("Item")
+    def update(self, video_id, ytvideoname, ytlink, description, length):
+        """Replace an existing video. Returns None if it doesn't exist."""
+        existing = self.table.get_item(Key={"id": video_id}).get("Item")
         if not existing:
             return None
-        item = {
-            "id": item_id,
-            "name": name,
-            "cost": Decimal(str(cost)),
-            "quantity": int(quantity),
+        video = {
+            "id": video_id,
+            "ytvideoname": ytvideoname,
+            "ytlink": ytlink,
+            "description": description,
+            "length": int(length),
+            "created_at": existing.get("created_at", datetime.now(timezone.utc).isoformat()),
         }
-        self.table.put_item(Item=item)
-        self._cache_delete(f"item:{item_id}", LIST_CACHE_KEY)
-        return to_jsonable(item)
+        self.table.put_item(Item=video)
+        self._cache_delete(f"video:{video_id}", LIST_CACHE_KEY)
+        return to_jsonable(video)
 
-    def delete(self, item_id):
-        self.table.delete_item(Key={"id": item_id})
-        self._cache_delete(f"item:{item_id}", LIST_CACHE_KEY)
+    def delete(self, video_id):
+        self.table.delete_item(Key={"id": video_id})
+        self._cache_delete(f"video:{video_id}", LIST_CACHE_KEY)
 
     def ping(self):
         """Report dependency health for /health/deep."""

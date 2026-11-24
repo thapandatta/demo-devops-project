@@ -1,22 +1,35 @@
 import os
 import socket
-from decimal import Decimal, InvalidOperation
-from flask import send_from_directory
+from urllib.parse import parse_qs, urlparse
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
 
-from storage import ItemStore
+from storage import VideoStore
 
 app = Flask(__name__)
 
 _store = None
+
+MAX_NAME_LENGTH = 200
+MAX_DESCRIPTION_LENGTH = 1000
+MAX_LINK_LENGTH = 500
+MAX_VIDEO_MINUTES = 100000  # sanity cap, about 69 days
+
+YOUTUBE_HOSTS = {
+    "youtube.com",
+    "www.youtube.com",
+    "m.youtube.com",
+    "music.youtube.com",
+    "youtu.be",
+    "www.youtu.be",
+}
 
 
 def get_store():
     """Create the store lazily so tests can replace it."""
     global _store
     if _store is None:
-        _store = ItemStore()
+        _store = VideoStore()
     return _store
 
 
@@ -27,35 +40,72 @@ def build_greeting(name=None):
     return f"hello {cleaned}"
 
 
-def validate_item(data):
+def is_valid_youtube_link(link):
+    """True only for https links on a YouTube host that point at a video."""
+    try:
+        parsed = urlparse(link)
+    except ValueError:
+        return False
+
+    if parsed.scheme not in ("http", "https"):
+        return False
+    host = (parsed.hostname or "").lower()
+    if host not in YOUTUBE_HOSTS:
+        return False
+
+    if host.endswith("youtu.be"):
+        return len(parsed.path.strip("/")) > 0       # youtu.be/<id>
+    if parsed.path == "/watch":
+        return "v" in parse_qs(parsed.query)         # youtube.com/watch?v=<id>
+    return parsed.path.startswith(("/shorts/", "/embed/", "/live/"))
+
+
+def validate_video(data):
     """Return (clean_values, None) if valid, or (None, error_message)."""
     if not isinstance(data, dict):
         return None, "request body must be a JSON object"
 
-    name = str(data.get("name", "")).strip()
-    if not name:
-        return None, "'name' is required"
+    name = data.get("ytvideoname")
+    if not isinstance(name, str) or not name.strip():
+        return None, "'ytvideoname' is required"
+    name = name.strip()
+    if len(name) > MAX_NAME_LENGTH:
+        return None, f"'ytvideoname' must be at most {MAX_NAME_LENGTH} characters"
 
-    if "cost" not in data:
-        return None, "'cost' is required"
-    if isinstance(data["cost"], bool):
-        return None, "'cost' must be a number"
-    try:
-        cost = Decimal(str(data["cost"]))
-    except InvalidOperation:
-        return None, "'cost' must be a number"
-    if not cost.is_finite() or cost < 0:
-        return None, "'cost' must be zero or greater"
+    link = data.get("ytlink")
+    if not isinstance(link, str) or not link.strip():
+        return None, "'ytlink' is required"
+    link = link.strip()
+    if len(link) > MAX_LINK_LENGTH:
+        return None, f"'ytlink' must be at most {MAX_LINK_LENGTH} characters"
+    if not is_valid_youtube_link(link):
+        return None, "'ytlink' must be a valid YouTube video link"
 
-    if "quantity" not in data:
-        return None, "'quantity' is required"
-    quantity = data["quantity"]
-    if isinstance(quantity, bool) or not isinstance(quantity, int):
-        return None, "'quantity' must be a whole number"
-    if quantity < 0:
-        return None, "'quantity' must be zero or greater"
+    description = data.get("description", "")
+    if description is None:
+        description = ""
+    if not isinstance(description, str):
+        return None, "'description' must be text"
+    description = description.strip()
+    if len(description) > MAX_DESCRIPTION_LENGTH:
+        return None, f"'description' must be at most {MAX_DESCRIPTION_LENGTH} characters"
 
-    return {"name": name, "cost": cost, "quantity": quantity}, None
+    if "length" not in data:
+        return None, "'length' is required"
+    length = data["length"]
+    if isinstance(length, bool) or not isinstance(length, int):
+        return None, "'length' must be a whole number of minutes"
+    if length < 1:
+        return None, "'length' must be at least 1 minute"
+    if length > MAX_VIDEO_MINUTES:
+        return None, f"'length' must be at most {MAX_VIDEO_MINUTES} minutes"
+
+    return {
+        "ytvideoname": name,
+        "ytlink": link,
+        "description": description,
+        "length": length,
+    }, None
 
 
 @app.route("/")
@@ -66,6 +116,11 @@ def hello():
 @app.route("/greet/<name>")
 def greet(name):
     return build_greeting(name)
+
+
+@app.route("/ui")
+def ui():
+    return send_from_directory("static", "index.html")
 
 
 @app.route("/health")
@@ -90,51 +145,47 @@ def info():
     )
 
 
-@app.route("/items", methods=["GET"])
-def list_items():
-    items, cache_status = get_store().list_all()
-    response = jsonify(items=items, count=len(items))
+@app.route("/videos", methods=["GET"])
+def list_videos():
+    videos, cache_status = get_store().list_all()
+    response = jsonify(videos=videos, count=len(videos))
     response.headers["X-Cache"] = cache_status.upper()
     return response
 
 
-@app.route("/items", methods=["POST"])
-def add_item():
-    values, error = validate_item(request.get_json(silent=True))
+@app.route("/videos", methods=["POST"])
+def add_video():
+    values, error = validate_video(request.get_json(silent=True))
     if error:
         return jsonify(error=error), 400
-    item = get_store().add(**values)
-    return jsonify(item), 201
-
-@app.route("/ui")
-def ui():
-    return send_from_directory("static", "index.html")
+    video = get_store().add(**values)
+    return jsonify(video), 201
 
 
-@app.route("/items/<item_id>", methods=["GET"])
-def get_item(item_id):
-    item, cache_status = get_store().get(item_id)
-    if item is None:
-        return jsonify(error="item not found"), 404
-    response = jsonify(item)
+@app.route("/videos/<video_id>", methods=["GET"])
+def get_video(video_id):
+    video, cache_status = get_store().get(video_id)
+    if video is None:
+        return jsonify(error="video not found"), 404
+    response = jsonify(video)
     response.headers["X-Cache"] = cache_status.upper()
     return response
 
 
-@app.route("/items/<item_id>", methods=["PUT"])
-def update_item(item_id):
-    values, error = validate_item(request.get_json(silent=True))
+@app.route("/videos/<video_id>", methods=["PUT"])
+def update_video(video_id):
+    values, error = validate_video(request.get_json(silent=True))
     if error:
         return jsonify(error=error), 400
-    item = get_store().update(item_id, **values)
-    if item is None:
-        return jsonify(error="item not found"), 404
-    return jsonify(item)
+    video = get_store().update(video_id, **values)
+    if video is None:
+        return jsonify(error="video not found"), 404
+    return jsonify(video)
 
 
-@app.route("/items/<item_id>", methods=["DELETE"])
-def delete_item(item_id):
-    get_store().delete(item_id)
+@app.route("/videos/<video_id>", methods=["DELETE"])
+def delete_video(video_id):
+    get_store().delete(video_id)
     return "", 204
 
 

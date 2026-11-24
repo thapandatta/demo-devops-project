@@ -9,7 +9,7 @@ TOPIC_ARN = os.environ["TOPIC_ARN"]
 
 
 def unwrap(attribute):
-    """Convert one DynamoDB-typed value, such as {"S": "x"} or {"N": "5"}, to plain Python."""
+    """Convert one DynamoDB-typed value, such as {"S": "x"}, to plain Python."""
     kind, value = next(iter(attribute.items()))
     if kind == "S":
         return value
@@ -31,22 +31,23 @@ def lambda_handler(event, context):
     sent = 0
 
     for record in event.get("Records", []):
-        # Only brand-new rows. MODIFY (PUT/update) and REMOVE are ignored
         if record.get("eventName") != "INSERT":
             continue
 
         new_image = record["dynamodb"].get("NewImage", {})
-        item = {key: unwrap(value) for key, value in new_image.items()}
+        video = {key: unwrap(value) for key, value in new_image.items()}
 
-        subject = f"New item created: {item.get('name', 'unknown')}"[:100]
+        subject = f"New video added: {video.get('ytvideoname', 'unknown')}"[:100]
+        subject = subject.replace("\n", " ").replace("\r", " ")
         body = (
-            "A new row was created in DynamoDB.\n\n"
-            f"ID:       {item.get('id')}\n"
-            f"Name:     {item.get('name')}\n"
-            f"Cost:     {item.get('cost')}\n"
-            f"Quantity: {item.get('quantity')}\n\n"
+            "A new video was added.\n\n"
+            f"Name:        {video.get('ytvideoname')}\n"
+            f"Link:        {video.get('ytlink')}\n"
+            f"Length:      {video.get('length')} minutes\n"
+            f"Description: {video.get('description') or '(none)'}\n"
+            f"ID:          {video.get('id')}\n\n"
             "Full record:\n"
-            f"{json.dumps(item, indent=2, default=str)}\n"
+            f"{json.dumps(video, indent=2, default=str)}\n"
         )
 
         sns.publish(TopicArn=TOPIC_ARN, Subject=subject, Message=body)
@@ -54,3 +55,4 @@ def lambda_handler(event, context):
 
     print(f"Processed {len(event.get('Records', []))} record(s), sent {sent} email(s)")
     return {"sent": sent}
+

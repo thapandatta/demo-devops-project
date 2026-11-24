@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Items</title>
+  <title>Videos</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -12,7 +12,7 @@
       background: #f4f6f8;
       color: #1f2933;
     }
-    main { max-width: 640px; margin: 0 auto; padding: 24px 16px; }
+    main { max-width: 680px; margin: 0 auto; padding: 24px 16px; }
     header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
     h1 { font-size: 1.4rem; margin: 0; }
     button {
@@ -22,28 +22,31 @@
     button:hover { background: #1d4ed8; }
     ul { list-style: none; margin: 0; padding: 0; background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
     li {
-      display: flex; justify-content: space-between; align-items: center;
+      display: flex; justify-content: space-between; align-items: center; gap: 12px;
       padding: 14px 16px; cursor: pointer; border-bottom: 1px solid #eef0f3;
     }
     li:last-child { border-bottom: 0; }
     li:hover { background: #f1f5ff; }
     li.selected { background: #e0e9ff; }
-    .qty { color: #6b7280; font-size: 0.9rem; }
+    .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .length { color: #6b7280; font-size: 0.9rem; white-space: nowrap; }
     .message { padding: 24px; text-align: center; color: #6b7280; background: #fff; border-radius: 8px; }
     .error { color: #b91c1c; }
     #detail { margin-top: 16px; background: #fff; border-radius: 8px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
     #detail[hidden] { display: none; }
-    #detail h2 { margin: 0 0 12px; font-size: 1.1rem; }
+    #detail h2 { margin: 0 0 12px; font-size: 1.1rem; overflow-wrap: anywhere; }
     dl { display: grid; grid-template-columns: 110px 1fr; gap: 8px 12px; margin: 0; }
     dt { color: #6b7280; }
-    dd { margin: 0; word-break: break-all; }
+    dd { margin: 0; overflow-wrap: anywhere; }
+    dd.description { white-space: pre-wrap; }
+    a { color: #2563eb; }
     .hint { margin-top: 12px; font-size: 0.8rem; color: #9ca3af; }
   </style>
 </head>
 <body>
   <main>
     <header>
-      <h1>Items</h1>
+      <h1>Videos</h1>
       <button id="refresh" type="button">Refresh</button>
     </header>
 
@@ -57,7 +60,7 @@
     const detail = document.getElementById("detail");
     const refreshButton = document.getElementById("refresh");
 
-    // Build text safely. Item names come from users, so never insert them as HTML.
+    // Build text safely. Values come from users, so never insert them as HTML.
     function el(tag, text, className) {
       const node = document.createElement(tag);
       if (text !== undefined) node.textContent = text;
@@ -65,44 +68,67 @@
       return node;
     }
 
+    // Only allow a link to become clickable if it points at YouTube over http(s).
+    function safeYouTubeUrl(value) {
+      try {
+        const url = new URL(value);
+        const hosts = ["youtube.com", "www.youtube.com", "m.youtube.com",
+                       "music.youtube.com", "youtu.be", "www.youtu.be"];
+        if ((url.protocol === "https:" || url.protocol === "http:") && hosts.includes(url.hostname)) {
+          return url.href;
+        }
+      } catch (error) { /* not a valid URL */ }
+      return null;
+    }
+
+    // 135 -> "2h 15m", 45 -> "45m", 120 -> "2h"
+    function formatLength(minutes) {
+      const total = Number(minutes);
+      if (!Number.isFinite(total) || total < 0) return "unknown";
+      const hours = Math.floor(total / 60);
+      const rest = total % 60;
+      if (hours === 0) return rest + "m";
+      return rest === 0 ? hours + "h" : hours + "h " + rest + "m";
+    }
+
     function showMessage(text, isError) {
       listArea.replaceChildren(el("div", text, isError ? "message error" : "message"));
     }
 
-    async function loadItems() {
+    async function loadVideos() {
       detail.hidden = true;
       showMessage("Loading...");
       try {
-        const response = await fetch("/items");
+        const response = await fetch("/videos");
         if (!response.ok) throw new Error("Server returned " + response.status);
         const data = await response.json();
 
-        if (!data.items.length) {
-          showMessage("No items yet.");
+        if (!data.videos.length) {
+          showMessage("No videos yet.");
           return;
         }
 
         const list = el("ul");
-        data.items
+        data.videos
           .slice()
-          .sort((a, b) => a.name.localeCompare(b.name))
-          .forEach((item) => {
+          .sort((a, b) => a.ytvideoname.localeCompare(b.ytvideoname))
+          .forEach((video) => {
             const row = el("li");
-            row.dataset.id = item.id;
             row.tabIndex = 0;
-            row.append(el("span", item.name), el("span", "qty " + item.quantity, "qty"));
-            row.addEventListener("click", () => showDetail(item.id, row));
+            row.append(el("span", video.ytvideoname, "title"),
+                       el("span", formatLength(video.length), "length"));
+            row.addEventListener("click", () => showDetail(video.id, row));
             row.addEventListener("keydown", (event) => {
               if (event.key === "Enter" || event.key === " ") {
                 event.preventDefault();
-                showDetail(item.id, row);
+                showDetail(video.id, row);
               }
             });
             list.append(row);
           });
         listArea.replaceChildren(list);
       } catch (error) {
-        showMessage("Could not load items. " + error.message, true);
+        showMessage("Could not load videos. " + error.message, true);
       }
     }
 
@@ -113,21 +139,38 @@
       detail.replaceChildren(el("p", "Loading details..."));
 
       try {
-        const response = await fetch("/items/" + encodeURIComponent(id));
-        if (response.status === 404) throw new Error("This item no longer exists.");
+        const response = await fetch("/videos/" + encodeURIComponent(id));
+        if (response.status === 404) throw new Error("This video no longer exists.");
         if (!response.ok) throw new Error("Server returned " + response.status);
-        const item = await response.json();
+        const video = await response.json();
         const cache = response.headers.get("X-Cache");
 
         const fields = el("dl");
-        [
-          ["ID", item.id],
-          ["Name", item.name],
-          ["Cost", "$" + Number(item.cost).toFixed(2)],
-          ["Quantity", String(item.quantity)],
-        ].forEach(([label, value]) => fields.append(el("dt", label), el("dd", value)));
 
-        const parts = [el("h2", item.name), fields];
+        // Link: clickable only if it passes the YouTube check, otherwise plain text
+        const linkCell = el("dd");
+        const safeUrl = safeYouTubeUrl(video.ytlink);
+        if (safeUrl) {
+          const anchor = el("a", video.ytlink);
+          anchor.href = safeUrl;
+          anchor.target = "_blank";
+          anchor.rel = "noopener noreferrer";
+          linkCell.append(anchor);
+        } else {
+          linkCell.textContent = video.ytlink;
+        }
+
+        const descriptionCell = el("dd", video.description || "No description", "description");
+
+        fields.append(
+          el("dt", "Name"), el("dd", video.ytvideoname),
+          el("dt", "Link"), linkCell,
+          el("dt", "Length"), el("dd", formatLength(video.length) + " (" + video.length + " min)"),
+          el("dt", "Description"), descriptionCell,
+          el("dt", "ID"), el("dd", video.id)
+        );
+
+        const parts = [el("h2", video.ytvideoname), fields];
         if (cache) parts.push(el("p", "Served from cache: " + cache, "hint"));
         detail.replaceChildren(...parts);
       } catch (error) {
@@ -135,8 +178,8 @@
       }
     }
 
-    refreshButton.addEventListener("click", loadItems);
-    loadItems();
+    refreshButton.addEventListener("click", loadVideos);
+    loadVideos();
   </script>
 </body>
 </html>
