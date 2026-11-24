@@ -29,6 +29,7 @@ resource "aws_iam_instance_profile" "ec2_ssm" {
 resource "aws_security_group" "web" {
   name        = "${var.project_name}-sg"
   description = "Allow HTTP inbound only"
+  vpc_id = var.vpc_id
 
   ingress {
     description = "HTTP"
@@ -54,6 +55,7 @@ resource "aws_instance" "web" {
   iam_instance_profile        = aws_iam_instance_profile.ec2_ssm.name
   vpc_security_group_ids      = [aws_security_group.web.id]
   associate_public_ip_address = true
+  subnet_id=var.subnet_id
 
   metadata_options {
     http_endpoint = "enabled"

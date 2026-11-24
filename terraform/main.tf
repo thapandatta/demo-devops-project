@@ -33,6 +33,8 @@ module "app_server" {
 
   project_name  = var.project_name
   instance_type = var.instance_type
+  vpc_id=module.network.vpc_id
+  subnet_id = module.network.public_subnet_id
 }
 
 module "cicd_access" {
@@ -51,6 +53,13 @@ module "notifications" {
   table_stream_arn = module.app_server.table_stream_arn
 }
 
+module "network"{
+  source = "./modules/network"
+
+  project_name=var.project_name
+  region=var.region
+
+}
 # ---------- $1 budget alert (single resource, so no module needed) ----------
 resource "aws_budgets_budget" "learning" {
   name         = "${var.project_name}-budget"
