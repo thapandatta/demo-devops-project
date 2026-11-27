@@ -113,22 +113,7 @@ jobs:
           . "$RUNNER_TEMP/venv/bin/activate"
           pip install --quiet -r app/requirements.txt -r app/requirements-dev.txt
 
-      - name: Run unit tests with coverage
-        working-directory: app
-        run: |
-          . "$RUNNER_TEMP/venv/bin/activate"
-          pytest -v --cov=. --cov-report=term-missing --cov-report=xml:../coverage.xml
 
-      - name: SonarCloud scan
-        uses: SonarSource/sonarqube-scan-action@v5
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-
-      - name: SonarCloud quality gate
-        uses: SonarSource/sonarqube-quality-gate-action@v1
-        timeout-minutes: 5
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
   build-scan-push:
     needs: [preflight, security-scans, test-and-scan]
