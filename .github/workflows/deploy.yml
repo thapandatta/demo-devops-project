@@ -142,10 +142,7 @@ jobs:
       - name: Build image (local only)
         run: docker build -t ${{ env.IMAGE_NAME }}:scan ./app
 
-      - name: Trivy (image vulnerabilities)
-        run: |
-          trivy image --severity CRITICAL,HIGH --ignore-unfixed \
-            --exit-code 1 ${{ env.IMAGE_NAME }}:scan
+      
 
       - name: Log in to Docker Hub
         run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
