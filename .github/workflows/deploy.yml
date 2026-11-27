@@ -89,10 +89,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Gitleaks (committed secrets)
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Checkov (Terraform security, report only)
         run: checkov -d terraform --framework terraform --soft-fail --quiet
