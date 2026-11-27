@@ -48,7 +48,7 @@ jobs:
           aws ec2 wait instance-running --instance-ids "${{ vars.RUNNER_INSTANCE_ID }}"
           aws ec2 wait instance-status-ok --instance-ids "${{ vars.RUNNER_INSTANCE_ID }}"
           echo "Instance is up. Waiting for the runner service to connect to GitHub..."
-          sleep 45
+          sleep 10
 
   # =====================================================================
   # 2. Everything below runs on YOUR runner (inside the VPC)
