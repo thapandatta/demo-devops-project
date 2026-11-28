@@ -1,11 +1,5 @@
 services:
   app:
-  logging:
-      driver: awslogs
-      options:
-        awslogs-region: us-east-1
-        awslogs-group: /hello-user/app
-        awslogs-stream: app-server
     image: ${IMAGE}
     container_name: hello-user
     restart: unless-stopped
@@ -18,16 +12,25 @@ services:
       REDIS_URL: redis://redis:6379/0
     depends_on:
       - redis
-
-  redis:
-  logging:
+    logging:
       driver: awslogs
       options:
         awslogs-region: us-east-1
         awslogs-group: /hello-user/app
-        awslogs-stream: app-server
+        awslogs-stream: ${HOSTNAME:-app-server}
+        mode: non-blocking
+        max-buffer-size: 4m
+
+  redis:
     image: redis:7-alpine
     container_name: hello-user-redis
     restart: unless-stopped
     command: ["redis-server", "--maxmemory", "64mb", "--maxmemory-policy", "allkeys-lru"]
-    # No "ports:" on purpose: Redis is reachable only inside the Docker network
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: us-east-1
+        awslogs-group: /hello-user/redis
+        awslogs-stream: ${HOSTNAME:-app-server}
+        mode: non-blocking
+        max-buffer-size: 4m
