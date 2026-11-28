@@ -1,5 +1,11 @@
 services:
   app:
+  logging:
+      driver: awslogs
+      options:
+        awslogs-region: us-east-1
+        awslogs-group: /hello-user/app
+        awslogs-stream: app-server
     image: ${IMAGE}
     container_name: hello-user
     restart: unless-stopped
@@ -14,6 +20,12 @@ services:
       - redis
 
   redis:
+  logging:
+      driver: awslogs
+      options:
+        awslogs-region: us-east-1
+        awslogs-group: /hello-user/app
+        awslogs-stream: app-server
     image: redis:7-alpine
     container_name: hello-user-redis
     restart: unless-stopped
